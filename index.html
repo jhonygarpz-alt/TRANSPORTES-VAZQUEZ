@@ -218,17 +218,11 @@
 
   .unidad-wrap { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
   .unidad-actions { display: flex; align-items: center; gap: 4px; margin-left: auto; }
-  .btn-del-row, .btn-flag-row {
-    flex: none; width: 30px; height: 30px; border-radius: 8px; border: 1px solid transparent;
-    cursor: pointer; display: inline-flex; align-items: center; justify-content: center; padding: 0;
-    touch-action: manipulation;
+  .btn-del-row {
+    flex: none; width: 22px; height: 22px; border-radius: 6px; border: none; background: transparent;
+    color: #FCA5A5; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; padding: 0;
   }
-  .btn-del-row { color: #DC2626; background: #FEF2F2; border-color: #FECACA; }
-  .btn-del-row:hover { background: #FEE2E2; }
-  .btn-flag-row { color: #B45309; background: #FFFBEB; border-color: #FDE68A; }
-  .btn-flag-row:hover { background: #FEF3C7; }
-  .btn-flag-row.active { color: #fff; background: #DC2626; border-color: #DC2626; }
-  .btn-flag-row.active:hover { background: #B91C1C; }
+  .btn-del-row:hover { background: #FEE2E2; color: #DC2626; }
 
   .unavailable-badge {
     display: inline-block; font-size: 9px; font-weight: 800; letter-spacing: .02em;
@@ -558,15 +552,7 @@
           if (document.activeElement !== inpCliente && inpCliente.value !== (r.cliente || "")) {
             inpCliente.value = r.cliente || "";
           }
-          var shouldFlag = !!r.robada;
-          if (tr.classList.contains("row-unavailable") !== shouldFlag) {
-            tr.classList.toggle("row-unavailable", shouldFlag);
-            var flagBtn = tr.querySelector(".btn-flag-row");
-            var badgeEl = tr.querySelector(".unavailable-badge");
-            flagBtn.classList.toggle("active", shouldFlag);
-            flagBtn.title = shouldFlag ? "Marcar como disponible" : "Marcar como no disponible (robada)";
-            badgeEl.hidden = !shouldFlag;
-          }
+          updateAvailabilityFromStatus(tr, sel.value);
         });
 
         // rows deleted by someone else: remove locally too (unless being edited right now)
@@ -607,8 +593,7 @@
         tipo: tr.querySelector('select[data-field="tipo"]').value,
         ubicacion: tr.querySelector('input[data-field="ubicacion"]').value,
         status: tr.querySelector('select[data-field="status"]').value,
-        cliente: tr.querySelector('input[data-field="cliente"]').value,
-        robada: tr.classList.contains("row-unavailable")
+        cliente: tr.querySelector('input[data-field="cliente"]').value
       };
     });
   }
@@ -762,13 +747,23 @@
     sel.style.color = info.color;
   }
 
+  // A unit auto-highlights as unavailable when its status is "Sin comunicación" —
+  // no manual toggle needed.
+  var UNAVAILABLE_STATUS = "Sin comunicación";
+  function updateAvailabilityFromStatus(tr, status) {
+    var shouldFlag = status === UNAVAILABLE_STATUS;
+    if (tr.classList.contains("row-unavailable") === shouldFlag) return;
+    tr.classList.toggle("row-unavailable", shouldFlag);
+    var badgeEl = tr.querySelector(".unavailable-badge");
+    if (badgeEl) badgeEl.hidden = !shouldFlag;
+  }
+
   // --- build one row element (used for the initial table and for units added later) ---
   var tbody = document.getElementById("rowsBody");
 
   function createRowElement(rowData) {
     var tr = document.createElement("tr");
     tr.dataset.rowId = rowData.id || generateId();
-    if (rowData.robada) tr.classList.add("row-unavailable");
 
     var tdUnidad = document.createElement("td");
     tdUnidad.className = "unidad";
@@ -780,26 +775,10 @@
     var badge = document.createElement("span");
     badge.className = "unavailable-badge";
     badge.textContent = "NO DISPONIBLE";
-    badge.hidden = !rowData.robada;
+    badge.hidden = true;
 
     var actions = document.createElement("div");
     actions.className = "unidad-actions";
-
-    var btnFlag = document.createElement("button");
-    btnFlag.type = "button";
-    btnFlag.className = "btn-flag-row" + (rowData.robada ? " active" : "");
-    btnFlag.title = rowData.robada ? "Marcar como disponible" : "Marcar como no disponible (robada)";
-    btnFlag.innerHTML =
-      '<svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
-      '<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>' +
-      '<line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
-    btnFlag.addEventListener("click", function () {
-      var active = tr.classList.toggle("row-unavailable");
-      btnFlag.classList.toggle("active", active);
-      btnFlag.title = active ? "Marcar como disponible" : "Marcar como no disponible (robada)";
-      badge.hidden = !active;
-      scheduleWrite();
-    });
 
     var btnDelUnit = document.createElement("button");
     btnDelUnit.type = "button";
@@ -817,7 +796,6 @@
       writeFullState();
     });
 
-    actions.appendChild(btnFlag);
     actions.appendChild(btnDelUnit);
     unidadWrap.appendChild(unidadText);
     unidadWrap.appendChild(badge);
@@ -856,7 +834,12 @@
     rebuildStatusOptionsFor(sel);
     sel.value = rowData.status || "En tránsito";
     applySelectColors(sel);
-    sel.addEventListener("change", function () { applySelectColors(sel); scheduleWrite(); });
+    updateAvailabilityFromStatus(tr, sel.value);
+    sel.addEventListener("change", function () {
+      applySelectColors(sel);
+      updateAvailabilityFromStatus(tr, sel.value);
+      scheduleWrite();
+    });
     tdStatus.appendChild(sel);
     tr.appendChild(tdStatus);
 
@@ -1045,7 +1028,7 @@
         y += tableHeaderHeight;
 
         rows.forEach(function (r, i) {
-          ctx.fillStyle = r.robada ? "#FECACA" : (i % 2 === 0 ? "#FFF3EC" : "#FFFFFF");
+          ctx.fillStyle = r.status === UNAVAILABLE_STATUS ? "#FECACA" : (i % 2 === 0 ? "#FFF3EC" : "#FFFFFF");
           ctx.fillRect(0, y, width, rowHeight);
           ctx.strokeStyle = "#F0E0D6";
           ctx.lineWidth = 1;
