@@ -272,21 +272,20 @@
   var TOTAL_UNIDADES = 28;
   var lastCapture = null;
 
-  // --- Firebase (Firestore) realtime sync across devices/browsers ---
-  var FIREBASE_CONFIG = {
-    apiKey: "AIzaSyCwYyKC4eRB8y1kXpmS6_eARN0qhx0qPUs",
-    authDomain: "tlaav-f2925.firebaseapp.com",
-    projectId: "tlaav-f2925",
-    storageBucket: "tlaav-f2925.firebasestorage.app",
-    messagingSenderId: "1062541457521",
-    appId: "1:1062541457521:web:bce0f8aae839874c4843d0"
-  };
-  var FIREBASE_SDK = "https://www.gstatic.com/firebasejs/10.13.0/";
-  var fsApi = null;
-  var firestoreDocRef = null;
+  // --- Firestore sync across devices/browsers via plain REST + polling ---
+  // (Not the Firebase JS SDK: its persistent WebChannel connection gets
+  // silently swallowed by some corporate/proxy networks — requests "succeed"
+  // but no data ever reaches the server. Plain fetch() request/response looks
+  // like ordinary web traffic and works everywhere.)
+  var FIRESTORE_API_KEY = "AIzaSyCwYyKC4eRB8y1kXpmS6_eARN0qhx0qPUs";
+  var FIRESTORE_DOC_URL =
+    "https://firestore.googleapis.com/v1/projects/tlaav-f2925/databases/(default)/documents/flota/estatus?key=" +
+    FIRESTORE_API_KEY;
+  var POLL_INTERVAL_MS = 4000;
   var syncEnabled = false;
   var writeTimer = null;
   var applyingRemote = false;
+  var pollFailures = 0;
 
   function setSyncStatus(state, text) {
     var el = document.getElementById("syncStatus");
@@ -295,39 +294,87 @@
     txt.textContent = text;
   }
 
-  function initFirebaseSync() {
-    Promise.all([
-      import(FIREBASE_SDK + "firebase-app.js"),
-      import(FIREBASE_SDK + "firebase-firestore.js")
-    ]).then(function (mods) {
-      var appMod = mods[0];
-      var fs = mods[1];
-      fsApi = fs;
-      var app = appMod.initializeApp(FIREBASE_CONFIG);
-      var firestore = fs.initializeFirestore(app, {
-        experimentalAutoDetectLongPolling: true,
-        useFetchStreams: false
-      });
-      firestoreDocRef = fs.doc(firestore, "flota/estatus");
+  function fsValueToJs(v) {
+    if (!v) return null;
+    if ("stringValue" in v) return v.stringValue;
+    if ("integerValue" in v) return parseInt(v.integerValue, 10);
+    if ("doubleValue" in v) return v.doubleValue;
+    if ("booleanValue" in v) return v.booleanValue;
+    if ("nullValue" in v) return null;
+    if ("arrayValue" in v) return (v.arrayValue.values || []).map(fsValueToJs);
+    if ("mapValue" in v) {
+      var out = {};
+      var f = v.mapValue.fields || {};
+      Object.keys(f).forEach(function (k) { out[k] = fsValueToJs(f[k]); });
+      return out;
+    }
+    return null;
+  }
 
-      fs.onSnapshot(firestoreDocRef, function (snap) {
-        syncEnabled = true;
-        setSyncStatus("online", "En línea" + (snap.metadata.fromCache ? " (caché)" : ""));
-        if (snap.exists()) {
-          applyRemoteState(snap.data());
-        } else {
-          writeFullState();
-        }
-      }, function (err) {
-        console.error("Firestore onSnapshot error:", err && err.code, err && err.message, err);
-        syncEnabled = false;
-        setSyncStatus("offline", "Sin conexión (" + ((err && err.code) || "?") + ")");
+  function jsValueToFs(v) {
+    if (v === null || v === undefined) return { nullValue: null };
+    if (typeof v === "string") return { stringValue: v };
+    if (typeof v === "number") {
+      return Number.isInteger(v) ? { integerValue: String(v) } : { doubleValue: v };
+    }
+    if (typeof v === "boolean") return { booleanValue: v };
+    if (Array.isArray(v)) return { arrayValue: { values: v.map(jsValueToFs) } };
+    var fields = {};
+    Object.keys(v).forEach(function (k) { fields[k] = jsValueToFs(v[k]); });
+    return { mapValue: { fields: fields } };
+  }
+
+  function firestoreGet() {
+    return fetch(FIRESTORE_DOC_URL, { method: "GET", cache: "no-store" }).then(function (res) {
+      if (res.status === 404) return null;
+      if (!res.ok) {
+        return res.text().then(function (t) { throw new Error("GET " + res.status + ": " + t); });
+      }
+      return res.json().then(function (doc) {
+        var out = {};
+        var f = doc.fields || {};
+        Object.keys(f).forEach(function (k) { out[k] = fsValueToJs(f[k]); });
+        return out;
       });
+    });
+  }
+
+  function firestorePatch(data) {
+    var fields = {};
+    Object.keys(data).forEach(function (k) { fields[k] = jsValueToFs(data[k]); });
+    return fetch(FIRESTORE_DOC_URL, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fields: fields })
+    }).then(function (res) {
+      if (!res.ok) {
+        return res.text().then(function (t) { throw new Error("PATCH " + res.status + ": " + t); });
+      }
+      return res.json();
+    });
+  }
+
+  function pollOnce() {
+    firestoreGet().then(function (data) {
+      pollFailures = 0;
+      syncEnabled = true;
+      setSyncStatus("online", "En línea");
+      if (data) {
+        applyRemoteState(data);
+      } else {
+        writeFullState();
+      }
     }).catch(function (err) {
-      console.error("Firebase SDK load error:", err);
+      pollFailures++;
+      console.error("Firestore GET error:", err);
       syncEnabled = false;
       setSyncStatus("offline", "Sin conexión (cambios solo locales)");
     });
+  }
+
+  function initFirebaseSync() {
+    pollOnce();
+    setInterval(pollOnce, POLL_INTERVAL_MS);
   }
 
   function applyRemoteState(data) {
@@ -376,19 +423,17 @@
   }
 
   function writeFullState() {
-    if (!firestoreDocRef || !fsApi) return;
-    fsApi.setDoc(firestoreDocRef, { rows: collectRows(), updatedAt: Date.now() }, { merge: true }).catch(function (err) {
-      console.error("Firestore write error (writeFullState):", err && err.code, err && err.message, err);
-      setSyncStatus("offline", "Error al guardar (" + ((err && err.code) || "?") + ")");
+    var body = { rows: collectRows(), updatedAt: Date.now() };
+    if (lastCapture) body.lastCapture = lastCapture.getTime();
+    firestorePatch(body).catch(function (err) {
+      console.error("Firestore write error (writeFullState):", err);
+      setSyncStatus("offline", "Error al guardar");
     });
   }
 
   function writeLastCapture(date) {
-    if (!firestoreDocRef || !fsApi) return;
-    fsApi.setDoc(firestoreDocRef, { lastCapture: date.getTime() }, { merge: true }).catch(function (err) {
-      console.error("Firestore write error (writeLastCapture):", err && err.code, err && err.message, err);
-      setSyncStatus("offline", "Error al guardar (" + ((err && err.code) || "?") + ")");
-    });
+    lastCapture = date;
+    writeFullState();
   }
 
   function scheduleWrite() {
