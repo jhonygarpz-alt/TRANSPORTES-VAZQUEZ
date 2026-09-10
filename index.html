@@ -61,6 +61,11 @@
   }
   .clock-time { font-family: ui-monospace, monospace; font-weight: 700; font-size: 22px; line-height: 1; }
   .clock-date { font-size: 12px; opacity: .9; margin-top: 2px; }
+  .sync-status { font-size: 10px; margin-top: 3px; opacity: .95; display: flex; align-items: center; gap: 4px; }
+  .sync-dot { width: 7px; height: 7px; border-radius: 50%; background: #9CA3AF; flex: none; }
+  .sync-status.connecting .sync-dot { background: #FCD34D; }
+  .sync-status.online .sync-dot { background: #4ADE80; }
+  .sync-status.offline .sync-dot { background: #F87171; }
 
   .subbar {
     padding: 12px 24px;
@@ -193,6 +198,7 @@
         <div>
           <div class="clock-time" id="clockTime">--:--:--</div>
           <div class="clock-date" id="clockDate">—</div>
+          <div class="sync-status connecting" id="syncStatus"><span class="sync-dot"></span><span id="syncStatusText">Conectando…</span></div>
         </div>
       </div>
     </div>
@@ -266,6 +272,120 @@
   var TOTAL_UNIDADES = 28;
   var lastCapture = null;
 
+  // --- Firebase (Firestore) realtime sync across devices/browsers ---
+  var FIREBASE_CONFIG = {
+    apiKey: "AIzaSyCwYyKC4eRB8y1kXpmS6_eARN0qhx0qPUs",
+    authDomain: "tlaav-f2925.firebaseapp.com",
+    projectId: "tlaav-f2925",
+    storageBucket: "tlaav-f2925.firebasestorage.app",
+    messagingSenderId: "1062541457521",
+    appId: "1:1062541457521:web:bce0f8aae839874c4843d0"
+  };
+  var FIREBASE_SDK = "https://www.gstatic.com/firebasejs/10.13.0/";
+  var fsApi = null;
+  var firestoreDocRef = null;
+  var syncEnabled = false;
+  var writeTimer = null;
+  var applyingRemote = false;
+
+  function setSyncStatus(state, text) {
+    var el = document.getElementById("syncStatus");
+    var txt = document.getElementById("syncStatusText");
+    el.className = "sync-status " + state;
+    txt.textContent = text;
+  }
+
+  function initFirebaseSync() {
+    Promise.all([
+      import(FIREBASE_SDK + "firebase-app.js"),
+      import(FIREBASE_SDK + "firebase-firestore.js")
+    ]).then(function (mods) {
+      var appMod = mods[0];
+      var fs = mods[1];
+      fsApi = fs;
+      var app = appMod.initializeApp(FIREBASE_CONFIG);
+      var firestore = fs.getFirestore(app);
+      firestoreDocRef = fs.doc(firestore, "flota/estatus");
+
+      fs.onSnapshot(firestoreDocRef, function (snap) {
+        syncEnabled = true;
+        setSyncStatus("online", "En línea");
+        if (snap.exists()) {
+          applyRemoteState(snap.data());
+        } else {
+          writeFullState();
+        }
+      }, function () {
+        syncEnabled = false;
+        setSyncStatus("offline", "Sin conexión (cambios solo locales)");
+      });
+    }).catch(function () {
+      syncEnabled = false;
+      setSyncStatus("offline", "Sin conexión (cambios solo locales)");
+    });
+  }
+
+  function applyRemoteState(data) {
+    applyingRemote = true;
+    try {
+      if (Array.isArray(data.rows)) {
+        data.rows.forEach(function (r, idx) {
+          var tr = tbody.children[idx];
+          if (!tr) return;
+          var inpUbic = tr.querySelector('input[data-field="ubicacion"]');
+          var sel = tr.querySelector('select[data-field="status"]');
+          var inpCliente = tr.querySelector('input[data-field="cliente"]');
+          if (document.activeElement !== inpUbic && inpUbic.value !== (r.ubicacion || "")) {
+            inpUbic.value = r.ubicacion || "";
+          }
+          if (document.activeElement !== sel && sel.value !== (r.status || "En tránsito")) {
+            sel.value = r.status || "En tránsito";
+            applySelectColors(sel);
+          }
+          if (document.activeElement !== inpCliente && inpCliente.value !== (r.cliente || "")) {
+            inpCliente.value = r.cliente || "";
+          }
+        });
+      }
+      if (typeof data.lastCapture === "number") {
+        var d = new Date(data.lastCapture);
+        if (!lastCapture || d.getTime() !== lastCapture.getTime()) {
+          lastCapture = d;
+          tick();
+        }
+      }
+    } finally {
+      applyingRemote = false;
+    }
+  }
+
+  function collectRows() {
+    return Array.prototype.map.call(tbody.querySelectorAll("tr"), function (tr, idx) {
+      return {
+        unidad: "ECO " + (idx + 1),
+        ubicacion: tr.querySelector('input[data-field="ubicacion"]').value,
+        status: tr.querySelector('select[data-field="status"]').value,
+        cliente: tr.querySelector('input[data-field="cliente"]').value
+      };
+    });
+  }
+
+  function writeFullState() {
+    if (!syncEnabled || !firestoreDocRef || !fsApi) return;
+    fsApi.setDoc(firestoreDocRef, { rows: collectRows(), updatedAt: Date.now() }, { merge: true }).catch(function () {});
+  }
+
+  function writeLastCapture(date) {
+    if (!syncEnabled || !firestoreDocRef || !fsApi) return;
+    fsApi.setDoc(firestoreDocRef, { lastCapture: date.getTime() }, { merge: true }).catch(function () {});
+  }
+
+  function scheduleWrite() {
+    if (applyingRemote) return;
+    clearTimeout(writeTimer);
+    writeTimer = setTimeout(writeFullState, 500);
+  }
+
   function statusInfo(label) {
     for (var i = 0; i < STATUS_OPTIONS.length; i++) {
       if (STATUS_OPTIONS[i].label === label) return STATUS_OPTIONS[i];
@@ -319,6 +439,7 @@
     inpUbic.type = "text";
     inpUbic.placeholder = "Ej. Puebla, MEX-CDMX km 120";
     inpUbic.dataset.field = "ubicacion";
+    inpUbic.addEventListener("input", scheduleWrite);
     tdUbic.appendChild(inpUbic);
     tr.appendChild(tdUbic);
 
@@ -340,6 +461,7 @@
     inpCliente.type = "text";
     inpCliente.placeholder = "Nombre del cliente";
     inpCliente.dataset.field = "cliente";
+    inpCliente.addEventListener("input", scheduleWrite);
     tdCliente.appendChild(inpCliente);
     tr.appendChild(tdCliente);
 
@@ -353,7 +475,7 @@
   }
   Array.prototype.forEach.call(tbody.querySelectorAll("select"), function (sel) {
     applySelectColors(sel);
-    sel.addEventListener("change", function () { applySelectColors(sel); });
+    sel.addEventListener("change", function () { applySelectColors(sel); scheduleWrite(); });
   });
 
   document.getElementById("totalUnidadesLabel").textContent =
@@ -389,6 +511,8 @@
       sel.value = "En tránsito";
       applySelectColors(sel);
     });
+    clearTimeout(writeTimer);
+    writeFullState();
   });
 
   // --- capture / generate PNG ---
@@ -398,15 +522,7 @@
     btn.disabled = true;
     label.textContent = "Generando…";
 
-    var rows = Array.prototype.map.call(tbody.querySelectorAll("tr"), function (tr, idx) {
-      return {
-        unidad: "ECO " + (idx + 1),
-        ubicacion: tr.querySelector('input[data-field="ubicacion"]').value,
-        status: tr.querySelector('select[data-field="status"]').value,
-        cliente: tr.querySelector('input[data-field="cliente"]').value
-      };
-    });
-
+    var rows = collectRows();
     var now = new Date();
 
     Promise.resolve().then(function () {
@@ -516,6 +632,7 @@
 
         var dataUrl = canvas.toDataURL("image/png");
         lastCapture = new Date();
+        writeLastCapture(lastCapture);
 
         var previewCard = document.getElementById("previewCard");
         var previewImg = document.getElementById("previewImg");
@@ -541,6 +658,8 @@
       label.textContent = "Capturar y compartir";
     });
   });
+
+  initFirebaseSync();
 })();
 </script>
 </body>
