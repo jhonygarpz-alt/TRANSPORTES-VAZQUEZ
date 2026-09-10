@@ -304,22 +304,27 @@
       var fs = mods[1];
       fsApi = fs;
       var app = appMod.initializeApp(FIREBASE_CONFIG);
-      var firestore = fs.getFirestore(app);
+      var firestore = fs.initializeFirestore(app, {
+        experimentalAutoDetectLongPolling: true,
+        useFetchStreams: false
+      });
       firestoreDocRef = fs.doc(firestore, "flota/estatus");
 
       fs.onSnapshot(firestoreDocRef, function (snap) {
         syncEnabled = true;
-        setSyncStatus("online", "En línea");
+        setSyncStatus("online", "En línea" + (snap.metadata.fromCache ? " (caché)" : ""));
         if (snap.exists()) {
           applyRemoteState(snap.data());
         } else {
           writeFullState();
         }
-      }, function () {
+      }, function (err) {
+        console.error("Firestore onSnapshot error:", err && err.code, err && err.message, err);
         syncEnabled = false;
-        setSyncStatus("offline", "Sin conexión (cambios solo locales)");
+        setSyncStatus("offline", "Sin conexión (" + ((err && err.code) || "?") + ")");
       });
-    }).catch(function () {
+    }).catch(function (err) {
+      console.error("Firebase SDK load error:", err);
       syncEnabled = false;
       setSyncStatus("offline", "Sin conexión (cambios solo locales)");
     });
@@ -371,13 +376,19 @@
   }
 
   function writeFullState() {
-    if (!syncEnabled || !firestoreDocRef || !fsApi) return;
-    fsApi.setDoc(firestoreDocRef, { rows: collectRows(), updatedAt: Date.now() }, { merge: true }).catch(function () {});
+    if (!firestoreDocRef || !fsApi) return;
+    fsApi.setDoc(firestoreDocRef, { rows: collectRows(), updatedAt: Date.now() }, { merge: true }).catch(function (err) {
+      console.error("Firestore write error (writeFullState):", err && err.code, err && err.message, err);
+      setSyncStatus("offline", "Error al guardar (" + ((err && err.code) || "?") + ")");
+    });
   }
 
   function writeLastCapture(date) {
-    if (!syncEnabled || !firestoreDocRef || !fsApi) return;
-    fsApi.setDoc(firestoreDocRef, { lastCapture: date.getTime() }, { merge: true }).catch(function () {});
+    if (!firestoreDocRef || !fsApi) return;
+    fsApi.setDoc(firestoreDocRef, { lastCapture: date.getTime() }, { merge: true }).catch(function (err) {
+      console.error("Firestore write error (writeLastCapture):", err && err.code, err && err.message, err);
+      setSyncStatus("offline", "Error al guardar (" + ((err && err.code) || "?") + ")");
+    });
   }
 
   function scheduleWrite() {
