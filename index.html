@@ -509,12 +509,18 @@
 
           if (!tr) {
             var row = hasRealId ? r : Object.assign({}, r, { id: rid });
-            tbody.appendChild(createRowElement(row));
+            tr = createRowElement(row);
+            tbody.insertBefore(tr, tbody.children[idx] || null);
             return;
           }
 
-          // keep DOM order in sync with the server's row order
-          tbody.appendChild(tr);
+          // Only move the row if it's actually out of place — re-inserting a
+          // node that's already in the right spot still triggers a DOM
+          // mutation and can jump the page's scroll position, which is
+          // disruptive while someone is typing further down the table.
+          if (tbody.children[idx] !== tr) {
+            tbody.insertBefore(tr, tbody.children[idx] || null);
+          }
 
           var tdUnidad = tr.querySelector("td.unidad .unidad-text");
           var inpUbic = tr.querySelector('input[data-field="ubicacion"]');
