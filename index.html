@@ -218,11 +218,14 @@
 
   .unidad-wrap { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
   .unidad-actions { display: flex; align-items: center; gap: 4px; margin-left: auto; }
-  .btn-del-row {
+  .btn-del-row, .btn-edit-row {
     flex: none; width: 22px; height: 22px; border-radius: 6px; border: none; background: transparent;
-    color: #FCA5A5; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; padding: 0;
+    cursor: pointer; display: inline-flex; align-items: center; justify-content: center; padding: 0;
   }
+  .btn-del-row { color: #FCA5A5; }
   .btn-del-row:hover { background: #FEE2E2; color: #DC2626; }
+  .btn-edit-row { color: #93C5FD; }
+  .btn-edit-row:hover { background: #DBEAFE; color: #2563EB; }
 
   .unavailable-badge {
     display: inline-block; font-size: 9px; font-weight: 800; letter-spacing: .02em;
@@ -780,6 +783,25 @@
     var actions = document.createElement("div");
     actions.className = "unidad-actions";
 
+    var btnEditUnit = document.createElement("button");
+    btnEditUnit.type = "button";
+    btnEditUnit.className = "btn-edit-row";
+    btnEditUnit.title = "Editar nombre de la unidad";
+    btnEditUnit.innerHTML =
+      '<svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>' +
+      '<path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
+    btnEditUnit.addEventListener("click", function () {
+      var current = unidadText.textContent;
+      var nuevo = window.prompt("Nuevo nombre para esta unidad:", current);
+      if (nuevo === null) return;
+      nuevo = nuevo.trim();
+      if (!nuevo || nuevo === current) return;
+      unidadText.textContent = nuevo;
+      clearTimeout(writeTimer);
+      writeFullState();
+    });
+
     var btnDelUnit = document.createElement("button");
     btnDelUnit.type = "button";
     btnDelUnit.className = "btn-del-row";
@@ -796,6 +818,7 @@
       writeFullState();
     });
 
+    actions.appendChild(btnEditUnit);
     actions.appendChild(btnDelUnit);
     unidadWrap.appendChild(unidadText);
     unidadWrap.appendChild(badge);
