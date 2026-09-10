@@ -1098,14 +1098,14 @@
         ctx.fillText("Generado: " + formatTime(now) + " · " + formatDateLong(now), width - 26, y + 34);
         ctx.globalAlpha = 1;
 
-        var dataUrl = canvas.toDataURL("image/png");
+        var dataUrl = canvas.toDataURL("image/jpeg", 0.92);
         lastCapture = new Date();
         writeLastCapture(lastCapture);
 
         var previewCard = document.getElementById("previewCard");
         var previewImg = document.getElementById("previewImg");
         var dlAgain = document.getElementById("dlAgain");
-        var fileName = "Estatus_TLAAV_" + formatFileStamp(new Date()) + ".png";
+        var fileName = "Estatus_TLAAV_" + formatFileStamp(new Date()) + ".jpg";
 
         previewImg.src = dataUrl;
         dlAgain.href = dataUrl;
