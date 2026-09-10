@@ -216,12 +216,27 @@
   }
   .del-status-btn:hover { background: rgba(0,0,0,.2); }
 
-  .unidad-wrap { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
-  .btn-del-row {
+  .unidad-wrap { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+  .unidad-actions { display: flex; align-items: center; gap: 2px; margin-left: auto; }
+  .btn-del-row, .btn-flag-row {
     flex: none; width: 22px; height: 22px; border-radius: 6px; border: none; background: transparent;
-    color: #FCA5A5; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; padding: 0;
+    cursor: pointer; display: inline-flex; align-items: center; justify-content: center; padding: 0;
   }
+  .btn-del-row { color: #FCA5A5; }
   .btn-del-row:hover { background: #FEE2E2; color: #DC2626; }
+  .btn-flag-row { color: #FCD34D; }
+  .btn-flag-row:hover { background: #FEF3C7; }
+  .btn-flag-row.active { color: #DC2626; }
+  .btn-flag-row.active:hover { background: #FEE2E2; }
+
+  .unavailable-badge {
+    display: inline-block; font-size: 9px; font-weight: 800; letter-spacing: .02em;
+    color: #fff; background: #DC2626; border-radius: 4px; padding: 2px 5px; white-space: nowrap;
+  }
+  .unavailable-badge[hidden] { display: none; }
+  tbody tr.row-unavailable {
+    background: repeating-linear-gradient(45deg, #FEE2E2, #FEE2E2 10px, #FECACA 10px, #FECACA 20px) !important;
+  }
 
   @media (max-width: 640px) {
     .header { flex-direction: column; align-items: flex-start; }
@@ -542,6 +557,15 @@
           if (document.activeElement !== inpCliente && inpCliente.value !== (r.cliente || "")) {
             inpCliente.value = r.cliente || "";
           }
+          var shouldFlag = !!r.robada;
+          if (tr.classList.contains("row-unavailable") !== shouldFlag) {
+            tr.classList.toggle("row-unavailable", shouldFlag);
+            var flagBtn = tr.querySelector(".btn-flag-row");
+            var badgeEl = tr.querySelector(".unavailable-badge");
+            flagBtn.classList.toggle("active", shouldFlag);
+            flagBtn.title = shouldFlag ? "Marcar como disponible" : "Marcar como no disponible (robada)";
+            badgeEl.hidden = !shouldFlag;
+          }
         });
 
         // rows deleted by someone else: remove locally too (unless being edited right now)
@@ -582,7 +606,8 @@
         tipo: tr.querySelector('select[data-field="tipo"]').value,
         ubicacion: tr.querySelector('input[data-field="ubicacion"]').value,
         status: tr.querySelector('select[data-field="status"]').value,
-        cliente: tr.querySelector('input[data-field="cliente"]').value
+        cliente: tr.querySelector('input[data-field="cliente"]').value,
+        robada: tr.classList.contains("row-unavailable")
       };
     });
   }
@@ -742,6 +767,7 @@
   function createRowElement(rowData) {
     var tr = document.createElement("tr");
     tr.dataset.rowId = rowData.id || generateId();
+    if (rowData.robada) tr.classList.add("row-unavailable");
 
     var tdUnidad = document.createElement("td");
     tdUnidad.className = "unidad";
@@ -750,6 +776,30 @@
     var unidadText = document.createElement("span");
     unidadText.className = "unidad-text";
     unidadText.textContent = rowData.unidad;
+    var badge = document.createElement("span");
+    badge.className = "unavailable-badge";
+    badge.textContent = "NO DISPONIBLE";
+    badge.hidden = !rowData.robada;
+
+    var actions = document.createElement("div");
+    actions.className = "unidad-actions";
+
+    var btnFlag = document.createElement("button");
+    btnFlag.type = "button";
+    btnFlag.className = "btn-flag-row" + (rowData.robada ? " active" : "");
+    btnFlag.title = rowData.robada ? "Marcar como disponible" : "Marcar como no disponible (robada)";
+    btnFlag.innerHTML =
+      '<svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>' +
+      '<line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
+    btnFlag.addEventListener("click", function () {
+      var active = tr.classList.toggle("row-unavailable");
+      btnFlag.classList.toggle("active", active);
+      btnFlag.title = active ? "Marcar como disponible" : "Marcar como no disponible (robada)";
+      badge.hidden = !active;
+      scheduleWrite();
+    });
+
     var btnDelUnit = document.createElement("button");
     btnDelUnit.type = "button";
     btnDelUnit.className = "btn-del-row";
@@ -765,8 +815,12 @@
       clearTimeout(writeTimer);
       writeFullState();
     });
+
+    actions.appendChild(btnFlag);
+    actions.appendChild(btnDelUnit);
     unidadWrap.appendChild(unidadText);
-    unidadWrap.appendChild(btnDelUnit);
+    unidadWrap.appendChild(badge);
+    unidadWrap.appendChild(actions);
     tdUnidad.appendChild(unidadWrap);
     tr.appendChild(tdUnidad);
 
@@ -990,7 +1044,7 @@
         y += tableHeaderHeight;
 
         rows.forEach(function (r, i) {
-          ctx.fillStyle = i % 2 === 0 ? "#FFF3EC" : "#FFFFFF";
+          ctx.fillStyle = r.robada ? "#FECACA" : (i % 2 === 0 ? "#FFF3EC" : "#FFFFFF");
           ctx.fillRect(0, y, width, rowHeight);
           ctx.strokeStyle = "#F0E0D6";
           ctx.lineWidth = 1;
