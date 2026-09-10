@@ -207,6 +207,21 @@
     width: 100%; padding: 9px; border-radius: 8px; border: 1px solid #E5E7EB; font: inherit; color: #1F2937;
   }
   .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 22px; }
+  .status-list { max-height: 220px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+  .status-pill-row { display: flex; align-items: center; justify-content: space-between; padding: 7px 10px; border-radius: 8px; font-size: 13px; font-weight: 600; }
+  .del-status-btn {
+    flex: none; width: 20px; height: 20px; border-radius: 6px; border: none;
+    background: rgba(0,0,0,.08); cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+    padding: 0; font-size: 15px; line-height: 1; color: inherit;
+  }
+  .del-status-btn:hover { background: rgba(0,0,0,.2); }
+
+  .unidad-wrap { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+  .btn-del-row {
+    flex: none; width: 22px; height: 22px; border-radius: 6px; border: none; background: transparent;
+    color: #FCA5A5; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; padding: 0;
+  }
+  .btn-del-row:hover { background: #FEE2E2; color: #DC2626; }
 
   @media (max-width: 640px) {
     .header { flex-direction: column; align-items: flex-start; }
@@ -314,12 +329,16 @@
 
 <div class="modal-overlay" id="modalAddStatus" hidden>
   <div class="modal-card">
-    <h3>Nuevo estatus</h3>
-    <label for="newStatusName">Nombre del estatus</label>
+    <h3>Estatus</h3>
+    <label for="newStatusName">Agregar nuevo</label>
     <input type="text" id="newStatusName" placeholder="Ej. En taller" />
+    <div class="modal-actions" style="margin-top:10px;">
+      <button type="button" class="btn-capture" id="confirmAddStatus" style="width:100%;">Agregar estatus</button>
+    </div>
+    <label>Estatus actuales</label>
+    <div class="status-list" id="statusList"></div>
     <div class="modal-actions">
-      <button type="button" class="btn-reset" id="cancelAddStatus">Cancelar</button>
-      <button type="button" class="btn-capture" id="confirmAddStatus">Agregar</button>
+      <button type="button" class="btn-reset" id="cancelAddStatus">Cerrar</button>
     </div>
   </div>
 </div>
@@ -474,16 +493,35 @@
         }
       }
       if (Array.isArray(data.rows)) {
+        var existingById = {};
+        Array.prototype.forEach.call(tbody.querySelectorAll("tr"), function (tr) {
+          if (tr.dataset.rowId) existingById[tr.dataset.rowId] = tr;
+        });
+        var seenIds = {};
+        var neededMigrationWrite = false;
+
         data.rows.forEach(function (r, idx) {
-          var tr = tbody.children[idx];
+          var hasRealId = !!r.id;
+          if (!hasRealId) neededMigrationWrite = true;
+          var rid = r.id || ("legacy-" + idx);
+          seenIds[rid] = true;
+          var tr = existingById[rid];
+
           if (!tr) {
-            tbody.appendChild(createRowElement(r));
+            var row = hasRealId ? r : Object.assign({}, r, { id: rid });
+            tbody.appendChild(createRowElement(row));
             return;
           }
+
+          // keep DOM order in sync with the server's row order
+          tbody.appendChild(tr);
+
+          var tdUnidad = tr.querySelector("td.unidad .unidad-text");
           var inpUbic = tr.querySelector('input[data-field="ubicacion"]');
           var selTipo = tr.querySelector('select[data-field="tipo"]');
           var sel = tr.querySelector('select[data-field="status"]');
           var inpCliente = tr.querySelector('input[data-field="cliente"]');
+          if (tdUnidad.textContent !== r.unidad) tdUnidad.textContent = r.unidad;
           if (document.activeElement !== inpUbic && inpUbic.value !== (r.ubicacion || "")) {
             inpUbic.value = r.ubicacion || "";
           }
@@ -499,7 +537,20 @@
             inpCliente.value = r.cliente || "";
           }
         });
+
+        // rows deleted by someone else: remove locally too (unless being edited right now)
+        Object.keys(existingById).forEach(function (rid) {
+          if (seenIds[rid]) return;
+          var tr = existingById[rid];
+          if (document.activeElement && tr.contains(document.activeElement)) return;
+          tr.remove();
+        });
+
         updateUnidadesLabel();
+        if (neededMigrationWrite) {
+          clearTimeout(writeTimer);
+          writeFullState();
+        }
       }
       if (typeof data.lastCapture === "number") {
         var d = new Date(data.lastCapture);
@@ -513,10 +564,15 @@
     }
   }
 
+  function generateId() {
+    return "r" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  }
+
   function collectRows() {
     return Array.prototype.map.call(tbody.querySelectorAll("tr"), function (tr) {
       return {
-        unidad: tr.querySelector("td.unidad").textContent,
+        id: tr.dataset.rowId,
+        unidad: tr.querySelector(".unidad-text").textContent,
         tipo: tr.querySelector('select[data-field="tipo"]').value,
         ubicacion: tr.querySelector('input[data-field="ubicacion"]').value,
         status: tr.querySelector('select[data-field="status"]').value,
@@ -592,6 +648,47 @@
     writeFullState();
   }
 
+  function removeStatusOption(label) {
+    var inUse = collectRows().some(function (r) { return r.status === label; });
+    if (inUse) {
+      window.alert('No se puede eliminar "' + label + '" porque hay unidades con ese estatus. Cámbialas primero a otro estatus.');
+      return;
+    }
+    if (statusOptions.length <= 1) {
+      window.alert("Debe quedar al menos un estatus disponible.");
+      return;
+    }
+    if (!window.confirm('¿Eliminar el estatus "' + label + '"?')) return;
+    statusOptions = statusOptions.filter(function (o) { return o.label !== label; });
+    refreshAllStatusSelects();
+    writeFullState();
+  }
+
+  function renderStatusList() {
+    var list = document.getElementById("statusList");
+    list.innerHTML = "";
+    statusOptions.forEach(function (opt) {
+      var row = document.createElement("div");
+      row.className = "status-pill-row";
+      row.style.backgroundColor = opt.bg;
+      row.style.color = opt.color;
+      var span = document.createElement("span");
+      span.textContent = opt.label;
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "del-status-btn";
+      btn.title = "Eliminar estatus";
+      btn.textContent = "×";
+      btn.addEventListener("click", function () {
+        removeStatusOption(opt.label);
+        renderStatusList();
+      });
+      row.appendChild(span);
+      row.appendChild(btn);
+      list.appendChild(row);
+    });
+  }
+
   function updateUnidadesLabel() {
     document.getElementById("totalUnidadesLabel").textContent = tbody.children.length + " unidades registradas";
   }
@@ -638,10 +735,33 @@
 
   function createRowElement(rowData) {
     var tr = document.createElement("tr");
+    tr.dataset.rowId = rowData.id || generateId();
 
     var tdUnidad = document.createElement("td");
     tdUnidad.className = "unidad";
-    tdUnidad.textContent = rowData.unidad;
+    var unidadWrap = document.createElement("div");
+    unidadWrap.className = "unidad-wrap";
+    var unidadText = document.createElement("span");
+    unidadText.className = "unidad-text";
+    unidadText.textContent = rowData.unidad;
+    var btnDelUnit = document.createElement("button");
+    btnDelUnit.type = "button";
+    btnDelUnit.className = "btn-del-row";
+    btnDelUnit.title = "Eliminar unidad";
+    btnDelUnit.innerHTML =
+      '<svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+      '<polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>' +
+      '<path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>';
+    btnDelUnit.addEventListener("click", function () {
+      if (!window.confirm('¿Eliminar la unidad "' + unidadText.textContent + '"? Esta acción no se puede deshacer.')) return;
+      tr.remove();
+      updateUnidadesLabel();
+      clearTimeout(writeTimer);
+      writeFullState();
+    });
+    unidadWrap.appendChild(unidadText);
+    unidadWrap.appendChild(btnDelUnit);
+    tdUnidad.appendChild(unidadWrap);
     tr.appendChild(tdUnidad);
 
     var tdTipo = document.createElement("td");
@@ -693,7 +813,7 @@
   }
 
   function defaultRow(i) {
-    return { unidad: "ECO " + (i + 1), tipo: "Propio", ubicacion: "", status: "En tránsito", cliente: "" };
+    return { id: generateId(), unidad: "ECO " + (i + 1), tipo: "Propio", ubicacion: "", status: "En tránsito", cliente: "" };
   }
 
   for (var i = 0; i < DEFAULT_TOTAL_UNIDADES; i++) {
@@ -701,7 +821,7 @@
   }
 
   function addUnit(nombre, tipo) {
-    tbody.appendChild(createRowElement({ unidad: nombre, tipo: tipo, ubicacion: "", status: "En tránsito", cliente: "" }));
+    tbody.appendChild(createRowElement({ id: generateId(), unidad: nombre, tipo: tipo, ubicacion: "", status: "En tránsito", cliente: "" }));
     updateUnidadesLabel();
     clearTimeout(writeTimer);
     writeFullState();
@@ -768,10 +888,11 @@
     if (e.target === modalAddUnit) modalAddUnit.hidden = true;
   });
 
-  // --- add status modal ---
+  // --- status modal (add + manage/remove) ---
   var modalAddStatus = document.getElementById("modalAddStatus");
   document.getElementById("btnAddStatus").addEventListener("click", function () {
     document.getElementById("newStatusName").value = "";
+    renderStatusList();
     modalAddStatus.hidden = false;
     document.getElementById("newStatusName").focus();
   });
@@ -785,7 +906,8 @@
       return;
     }
     addStatusOption(label);
-    modalAddStatus.hidden = true;
+    document.getElementById("newStatusName").value = "";
+    renderStatusList();
   });
   modalAddStatus.addEventListener("click", function (e) {
     if (e.target === modalAddStatus) modalAddStatus.hidden = true;
