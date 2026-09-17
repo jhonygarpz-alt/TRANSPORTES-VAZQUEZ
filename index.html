@@ -344,7 +344,14 @@
   .modulo-table input[type="date"], .modulo-table input[type="datetime-local"] { min-width: 150px; }
   .modulo-table td.comentarios input { min-width: 220px; }
   .modulo-dur { display: inline-block; min-width: 60px; text-align: center; font-weight: 700; color: #1D4ED8; }
-  .modulo-table td.actions { text-align: center; }
+  /* pinned as the first column so it stays visible without horizontal
+     scrolling on this wide table — otherwise it sits off-screen past 14
+     other columns and is easy to miss right after adding a row */
+  .modulo-table td.actions {
+    text-align: center; position: sticky; left: 0; z-index: 1; background: #fff;
+    border-right: 1px solid #E5E7EB;
+  }
+  .modulo-table th:first-child { position: sticky; left: 0; z-index: 3; border-right: 1px solid #334155; }
 
   @media (max-width: 640px) {
     .header { flex-direction: column; align-items: flex-start; }
@@ -537,6 +544,7 @@
       <table class="modulo-table">
         <thead>
           <tr>
+            <th></th>
             <th>FECHA</th>
             <th>CONTENEDOR</th>
             <th>OPERADOR</th>
@@ -551,7 +559,6 @@
             <th>INGRESO DE VACÍO</th>
             <th>ESTATUS / UBICACIÓN</th>
             <th>COMENTARIOS / OBSERVACIONES</th>
-            <th></th>
           </tr>
         </thead>
         <tbody id="moduloRowsBody"></tbody>
@@ -1298,6 +1305,17 @@
       return span;
     }
 
+    var tdActions = document.createElement("td");
+    tdActions.className = "actions";
+    var delBtn = document.createElement("button");
+    delBtn.type = "button";
+    delBtn.className = "btn-del-row";
+    delBtn.title = "Eliminar servicio";
+    delBtn.innerHTML = '<svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
+    delBtn.addEventListener("click", function () { removeModuloServicio(mod, tab, tr); });
+    tdActions.appendChild(delBtn);
+    tr.appendChild(tdActions);
+
     makeInput("fecha", "date");
     makeInput("contenedor", "text", "matrizContenedoresList", "Ej. CCLU1234567");
     makeInput("operador", "text", "moduloOperadoresList", "Chofer / unidad");
@@ -1339,17 +1357,6 @@
     inpComentarios.addEventListener("change", function () { onModuloFieldChange(mod, tab, tr); });
     tdComentarios.appendChild(inpComentarios);
     tr.appendChild(tdComentarios);
-
-    var tdActions = document.createElement("td");
-    tdActions.className = "actions";
-    var delBtn = document.createElement("button");
-    delBtn.type = "button";
-    delBtn.className = "btn-del-row";
-    delBtn.title = "Eliminar servicio";
-    delBtn.innerHTML = '<svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
-    delBtn.addEventListener("click", function () { removeModuloServicio(mod, tab, tr); });
-    tdActions.appendChild(delBtn);
-    tr.appendChild(tdActions);
 
     refreshModuloRowDurations(tr);
     return tr;
