@@ -96,8 +96,8 @@
   table { width: 100%; min-width: 900px; border-collapse: collapse; font-size: 14px; }
   thead tr { background: #1F2937; }
   thead th { color: #fff; text-align: left; font-weight: 600; padding: 12px 16px; }
-  thead th.w-unidad { width: 96px; }
-  thead th.w-tipo { width: 168px; }
+  thead th.w-unidad { width: 150px; }
+  thead th.w-contenedor { width: 150px; }
   thead th.w-status { width: 192px; }
   thead th.w-cliente { width: 208px; }
   tbody tr:nth-child(odd) { background: #FFF9F5; }
@@ -216,7 +216,13 @@
   }
   .del-status-btn:hover { background: rgba(0,0,0,.2); }
 
-  .unidad-wrap { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .unidad-wrap { display: flex; flex-direction: column; gap: 4px; }
+  .unidad-top { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .unidad-bottom { display: flex; align-items: center; gap: 4px; }
+  .tipo-mini {
+    width: auto; min-width: 0; padding: 2px 6px; font-size: 11px; font-weight: 600;
+    border-radius: 6px; border: none;
+  }
   .unidad-actions { display: flex; align-items: center; gap: 4px; margin-left: auto; }
   .btn-del-row, .btn-edit-row {
     flex: none; width: 22px; height: 22px; border-radius: 6px; border: none; background: transparent;
@@ -286,7 +292,7 @@
         <thead>
           <tr>
             <th class="w-unidad">UNIDAD</th>
-            <th class="w-tipo">TIPO</th>
+            <th class="w-contenedor">CONTENEDOR</th>
             <th>UBICACIÓN ACTUAL</th>
             <th class="w-status">STATUS ACTUAL</th>
             <th class="w-cliente">CLIENTE</th>
@@ -561,11 +567,15 @@
           }
 
           var tdUnidad = tr.querySelector("td.unidad .unidad-text");
+          var inpContenedor = tr.querySelector('input[data-field="contenedor"]');
           var inpUbic = tr.querySelector('input[data-field="ubicacion"]');
           var selTipo = tr.querySelector('select[data-field="tipo"]');
           var sel = tr.querySelector('select[data-field="status"]');
           var inpCliente = tr.querySelector('input[data-field="cliente"]');
           if (tdUnidad.textContent !== r.unidad) tdUnidad.textContent = r.unidad;
+          if (document.activeElement !== inpContenedor && inpContenedor.value !== (r.contenedor || "")) {
+            inpContenedor.value = r.contenedor || "";
+          }
           if (document.activeElement !== inpUbic && inpUbic.value !== (r.ubicacion || "")) {
             inpUbic.value = r.ubicacion || "";
           }
@@ -619,6 +629,7 @@
         id: tr.dataset.rowId,
         unidad: tr.querySelector(".unidad-text").textContent,
         tipo: tr.querySelector('select[data-field="tipo"]').value,
+        contenedor: tr.querySelector('input[data-field="contenedor"]').value,
         ubicacion: tr.querySelector('input[data-field="ubicacion"]').value,
         status: tr.querySelector('select[data-field="status"]').value,
         cliente: tr.querySelector('input[data-field="cliente"]').value
@@ -791,6 +802,17 @@
     ctx.closePath();
   }
 
+  // Truncates by measured pixel width (not character count) so text never
+  // overlaps the next column regardless of font or content length.
+  function truncateToWidth(ctx, text, maxWidth) {
+    if (ctx.measureText(text).width <= maxWidth) return text;
+    var t = text;
+    while (t.length > 1 && ctx.measureText(t + "…").width > maxWidth) {
+      t = t.slice(0, -1);
+    }
+    return t + "…";
+  }
+
   function applySelectColors(sel) {
     var info = statusInfo(sel.value);
     sel.style.backgroundColor = info.bg;
@@ -819,6 +841,9 @@
     tdUnidad.className = "unidad";
     var unidadWrap = document.createElement("div");
     unidadWrap.className = "unidad-wrap";
+
+    var unidadTop = document.createElement("div");
+    unidadTop.className = "unidad-top";
     var unidadText = document.createElement("span");
     unidadText.className = "unidad-text";
     unidadText.textContent = rowData.unidad;
@@ -826,6 +851,24 @@
     badge.className = "unavailable-badge";
     badge.textContent = "NO DISPONIBLE";
     badge.hidden = true;
+    unidadTop.appendChild(unidadText);
+    unidadTop.appendChild(badge);
+
+    var unidadBottom = document.createElement("div");
+    unidadBottom.className = "unidad-bottom";
+
+    var selTipo = document.createElement("select");
+    selTipo.className = "tipo-mini";
+    selTipo.dataset.field = "tipo";
+    ["Propio", "Permisionario"].forEach(function (t) {
+      var o = document.createElement("option");
+      o.value = t;
+      o.textContent = t;
+      selTipo.appendChild(o);
+    });
+    selTipo.value = rowData.tipo || "Propio";
+    applyTipoColors(selTipo);
+    selTipo.addEventListener("change", function () { applyTipoColors(selTipo); scheduleWrite(); });
 
     var actions = document.createElement("div");
     actions.className = "unidad-actions";
@@ -867,26 +910,22 @@
 
     actions.appendChild(btnEditUnit);
     actions.appendChild(btnDelUnit);
-    unidadWrap.appendChild(unidadText);
-    unidadWrap.appendChild(badge);
-    unidadWrap.appendChild(actions);
+    unidadBottom.appendChild(selTipo);
+    unidadBottom.appendChild(actions);
+    unidadWrap.appendChild(unidadTop);
+    unidadWrap.appendChild(unidadBottom);
     tdUnidad.appendChild(unidadWrap);
     tr.appendChild(tdUnidad);
 
-    var tdTipo = document.createElement("td");
-    var selTipo = document.createElement("select");
-    selTipo.dataset.field = "tipo";
-    ["Propio", "Permisionario"].forEach(function (t) {
-      var o = document.createElement("option");
-      o.value = t;
-      o.textContent = t;
-      selTipo.appendChild(o);
-    });
-    selTipo.value = rowData.tipo || "Propio";
-    applyTipoColors(selTipo);
-    selTipo.addEventListener("change", function () { applyTipoColors(selTipo); scheduleWrite(); });
-    tdTipo.appendChild(selTipo);
-    tr.appendChild(tdTipo);
+    var tdContenedor = document.createElement("td");
+    var inpContenedor = document.createElement("input");
+    inpContenedor.type = "text";
+    inpContenedor.placeholder = "Ej. MSKU1234567";
+    inpContenedor.dataset.field = "contenedor";
+    inpContenedor.value = rowData.contenedor || "";
+    inpContenedor.addEventListener("input", scheduleWrite);
+    tdContenedor.appendChild(inpContenedor);
+    tr.appendChild(tdContenedor);
 
     var tdUbic = document.createElement("td");
     var inpUbic = document.createElement("input");
@@ -1094,9 +1133,9 @@
         ctx.fillRect(0, y, width, tableHeaderHeight);
         ctx.fillStyle = "#FFFFFF";
         ctx.font = "bold 14px Arial";
-        var colX = [26, 100, 195, 470, 650];
+        var colX = [26, 150, 270, 500, 680];
         ctx.fillText("UNIDAD", colX[0], y + 27);
-        ctx.fillText("TIPO", colX[1], y + 27);
+        ctx.fillText("CONTENEDOR", colX[1], y + 27);
         ctx.fillText("UBICACIÓN ACTUAL", colX[2], y + 27);
         ctx.fillText("STATUS ACTUAL", colX[3], y + 27);
         ctx.fillText("CLIENTE", colX[4], y + 27);
@@ -1114,20 +1153,25 @@
 
           ctx.fillStyle = "#D84315";
           ctx.font = "bold 13px Arial";
-          ctx.fillText(r.unidad, colX[0], y + 22);
+          var unidadMaxWidth = colX[1] - colX[0] - 22; // leave room for the tipo dot
+          var unidadLabel = truncateToWidth(ctx, r.unidad, unidadMaxWidth);
+          ctx.fillText(unidadLabel, colX[0], y + 22);
+          var unidadTextWidth = ctx.measureText(unidadLabel).width;
 
+          // Propio/Permisionario shown as a small dot next to the unit name.
           var tipoInfo = TIPO_COLORS[r.tipo] || TIPO_COLORS.Propio;
-          ctx.fillStyle = tipoInfo.bg;
-          roundRect(ctx, colX[1] - 6, y + 6, 82, 22, 11);
-          ctx.fill();
           ctx.fillStyle = tipoInfo.color;
-          ctx.font = "bold 11px Arial";
-          ctx.fillText(r.tipo === "Permisionario" ? "Permis." : "Propio", colX[1], y + 21);
+          ctx.beginPath();
+          ctx.arc(colX[0] + unidadTextWidth + 10, y + 18, 4, 0, Math.PI * 2);
+          ctx.fill();
 
           ctx.fillStyle = "#1F2937";
           ctx.font = "13px Arial";
+          var cont = r.contenedor && r.contenedor.trim() ? r.contenedor : "—";
+          ctx.fillText(truncateToWidth(ctx, cont, colX[2] - colX[1] - 10), colX[1], y + 22);
+
           var ubic = r.ubicacion && r.ubicacion.trim() ? r.ubicacion : "—";
-          ctx.fillText(ubic.length > 27 ? ubic.slice(0, 26) + "…" : ubic, colX[2], y + 22);
+          ctx.fillText(truncateToWidth(ctx, ubic, colX[3] - colX[2] - 16), colX[2], y + 22);
 
           var info = statusInfo(r.status);
           ctx.fillStyle = info.bg;
@@ -1135,13 +1179,13 @@
           ctx.fill();
           ctx.fillStyle = info.color;
           ctx.font = "bold 12px Arial";
-          var statusLabel = r.status.length > 20 ? r.status.slice(0, 19) + "…" : r.status;
+          var statusLabel = truncateToWidth(ctx, r.status, 160);
           ctx.fillText(statusLabel, colX[3] + 2, y + 21);
 
           ctx.fillStyle = "#1F2937";
           ctx.font = "13px Arial";
           var cli = r.cliente && r.cliente.trim() ? r.cliente : "—";
-          ctx.fillText(cli.length > 22 ? cli.slice(0, 21) + "…" : cli, colX[4], y + 22);
+          ctx.fillText(truncateToWidth(ctx, cli, width - 26 - colX[4]), colX[4], y + 22);
 
           y += rowHeight;
         });
