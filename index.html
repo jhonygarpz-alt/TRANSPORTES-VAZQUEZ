@@ -646,10 +646,21 @@
   // create through "+ Módulo de cliente" carry a logo through Firestore.
   var clienteModulos = [];
 
+  // Module service-log rows, keyed by moduloRowsKey(mod, tab) -> array of
+  // row objects. Lives inside the same flota/estatus document as
+  // everything else (not a separate Firestore collection): the security
+  // rules set up for this project only open that one document, and a
+  // second collection would need its own rule change. Riding the existing
+  // document keeps everything working with zero extra setup; at the
+  // import volumes here (tens of rows going forward, not the client's full
+  // multi-thousand-row historical sheets) it stays well under Firestore's
+  // 1MB document limit.
+  var moduloRows = {};
+
   function allModulos() { return BUILTIN_MODULOS.concat(clienteModulos); }
 
-  function moduloCollectionId(mod, tab) {
-    return "modulo_" + slugify(mod.cliente) + "__" + tab.id;
+  function moduloRowsKey(mod, tab) {
+    return slugify(mod.cliente) + "__" + tab.id;
   }
 
   var TIPO_COLORS = {
@@ -742,72 +753,6 @@
     });
   }
 
-  // --- Firestore collection helpers, for client-module service logs (each
-  // row is its own document, unlike the single-document rows above — these
-  // logs are appended to indefinitely and a whole-document rewrite on every
-  // edit wouldn't scale the way it does for the ~40-row fleet table). ---
-  var FIRESTORE_PROJECT_BASE = "https://firestore.googleapis.com/v1/projects/tlaav-f2925/databases/default/documents/";
-
-  function firestoreListCollection(collectionId) {
-    var out = [];
-    function fetchPage(pageToken) {
-      var url = FIRESTORE_PROJECT_BASE + collectionId + "?pageSize=300&key=" + FIRESTORE_API_KEY +
-        (pageToken ? "&pageToken=" + encodeURIComponent(pageToken) : "");
-      return fetch(url, { method: "GET", cache: "no-store" }).then(function (res) {
-        if (res.status === 404) return null;
-        if (!res.ok) return res.text().then(function (t) { throw new Error("GET " + res.status + ": " + t); });
-        return res.json();
-      }).then(function (body) {
-        if (body && Array.isArray(body.documents)) {
-          body.documents.forEach(function (doc) {
-            var id = doc.name.split("/").pop();
-            var fields = {};
-            Object.keys(doc.fields || {}).forEach(function (k) { fields[k] = fsValueToJs(doc.fields[k]); });
-            out.push({ id: id, data: fields });
-          });
-        }
-        if (body && body.nextPageToken) return fetchPage(body.nextPageToken);
-        return out;
-      });
-    }
-    return fetchPage(null);
-  }
-
-  function firestoreCreateDoc(collectionId, data) {
-    var fields = {};
-    Object.keys(data).forEach(function (k) { fields[k] = jsValueToFs(data[k]); });
-    var url = FIRESTORE_PROJECT_BASE + collectionId + "?key=" + FIRESTORE_API_KEY;
-    return fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ fields: fields })
-    }).then(function (res) {
-      if (!res.ok) return res.text().then(function (t) { throw new Error("POST " + res.status + ": " + t); });
-      return res.json();
-    }).then(function (doc) { return doc.name.split("/").pop(); });
-  }
-
-  function firestoreUpdateDoc(collectionId, docId, data) {
-    var fields = {};
-    Object.keys(data).forEach(function (k) { fields[k] = jsValueToFs(data[k]); });
-    var url = FIRESTORE_PROJECT_BASE + collectionId + "/" + docId + "?key=" + FIRESTORE_API_KEY;
-    return fetch(url, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ fields: fields })
-    }).then(function (res) {
-      if (!res.ok) return res.text().then(function (t) { throw new Error("PATCH " + res.status + ": " + t); });
-      return res.json();
-    });
-  }
-
-  function firestoreDeleteDoc(collectionId, docId) {
-    var url = FIRESTORE_PROJECT_BASE + collectionId + "/" + docId + "?key=" + FIRESTORE_API_KEY;
-    return fetch(url, { method: "DELETE" }).then(function (res) {
-      if (!res.ok) return res.text().then(function (t) { throw new Error("DELETE " + res.status + ": " + t); });
-    });
-  }
-
   function pollOnce() {
     firestoreGet().then(function (data) {
       pollFailures = 0;
@@ -877,6 +822,17 @@
           clienteModulos = data.clienteModulos;
           renderModulesDock();
         }
+      }
+      if (data.moduloRows && typeof data.moduloRows === "object" && !Array.isArray(data.moduloRows)) {
+        Object.keys(data.moduloRows).forEach(function (key) {
+          if (JSON.stringify(data.moduloRows[key]) === JSON.stringify(moduloRows[key])) return;
+          moduloRows[key] = data.moduloRows[key];
+          if (activeModulo && activeModuloTab && moduloRowsKey(activeModulo, activeModuloTab) === key) {
+            var moduloBody = document.getElementById("moduloRowsBody");
+            var focusInModulo = document.activeElement && moduloBody && moduloBody.contains(document.activeElement);
+            if (!focusInModulo) renderModuloRowsBody(activeModulo, activeModuloTab);
+          }
+        });
       }
       if (Array.isArray(data.rows)) {
         var existingById = {};
@@ -1006,7 +962,7 @@
   }
 
   function writeFullState() {
-    var body = { rows: collectRows(), statusOptions: statusOptions, clientes: clientesConocidos, clientesOperadores: clientesOperadores, clienteModulos: clienteModulos, updatedAt: Date.now() };
+    var body = { rows: collectRows(), statusOptions: statusOptions, clientes: clientesConocidos, clientesOperadores: clientesOperadores, clienteModulos: clienteModulos, moduloRows: moduloRows, updatedAt: Date.now() };
     if (lastCapture) body.lastCapture = lastCapture.getTime();
     firestorePatch(body).catch(function (err) {
       console.error("Firestore write error (writeFullState):", err);
@@ -1299,32 +1255,25 @@
 
   function onModuloFieldChange(mod, tab, tr) {
     refreshModuloRowDurations(tr);
-    clearTimeout(tr._writeTimer);
-    tr._writeTimer = setTimeout(function () {
-      var data = collectModuloRowData(tr);
-      data.createdAt = Number(tr.dataset.createdAt) || Date.now();
-      var collectionId = moduloCollectionId(mod, tab);
-      var rowId = tr.dataset.rowId;
-      if (rowId.indexOf("pending-") === 0) {
-        if (tr.dataset.creating === "1") return;
-        tr.dataset.creating = "1";
-        firestoreCreateDoc(collectionId, data).then(function (newId) {
-          tr.dataset.rowId = newId;
-          tr.dataset.creating = "";
-        }).catch(function (err) {
-          console.error("Modulo create error:", err);
-          tr.dataset.creating = "";
-        });
-      } else {
-        firestoreUpdateDoc(collectionId, rowId, data).catch(function (err) { console.error("Modulo update error:", err); });
-      }
-    }, 600);
+    var rowId = tr.dataset.rowId;
+    var data = collectModuloRowData(tr);
+    data.id = rowId;
+    data.createdAt = Number(tr.dataset.createdAt) || Date.now();
+    var key = moduloRowsKey(mod, tab);
+    var found = false;
+    var list = (moduloRows[key] || []).map(function (r) {
+      if (r.id === rowId) { found = true; return data; }
+      return r;
+    });
+    if (!found) list = list.concat([data]);
+    moduloRows[key] = list;
+    scheduleWrite();
   }
 
-  function createModuloRowElement(mod, tab, rowId, data) {
+  function createModuloRowElement(mod, tab, data) {
     data = data || {};
     var tr = document.createElement("tr");
-    tr.dataset.rowId = rowId;
+    tr.dataset.rowId = data.id;
     tr.dataset.createdAt = String(data.createdAt || Date.now());
 
     function makeInput(field, type, listId, placeholder) {
@@ -1411,77 +1360,49 @@
     document.getElementById("moduloRowCount").textContent = n + (n === 1 ? " servicio" : " servicios");
   }
 
-  function addModuloServicio(mod, tab) {
+  function renderModuloRowsBody(mod, tab) {
+    var key = moduloRowsKey(mod, tab);
+    var list = moduloRows[key] || [];
     var tbodyModulo = document.getElementById("moduloRowsBody");
-    var tempId = "pending-" + generateId();
-    var createdAt = Date.now();
-    var tr = createModuloRowElement(mod, tab, tempId, { fecha: new Date().toISOString().slice(0, 10), createdAt: createdAt });
+    tbodyModulo.innerHTML = "";
+    list.forEach(function (rowData) {
+      tbodyModulo.appendChild(createModuloRowElement(mod, tab, rowData));
+    });
+    updateModuloRowCount();
+    refreshMatrizContenedoresDatalist();
+  }
+
+  function addModuloServicio(mod, tab) {
+    var key = moduloRowsKey(mod, tab);
+    var rowData = {
+      id: generateId(), fecha: new Date().toISOString().slice(0, 10),
+      contenedor: "", operador: "", destino: "", ingresoTerminal: "", salidaTerminal: "",
+      arriboCliente: "", terminoDescarga: "", salidaCliente: "", ingresoVacio: "",
+      estatus: "", comentarios: "", createdAt: Date.now()
+    };
+    moduloRows[key] = (moduloRows[key] || []).concat([rowData]);
+    var tbodyModulo = document.getElementById("moduloRowsBody");
+    var tr = createModuloRowElement(mod, tab, rowData);
     tbodyModulo.appendChild(tr);
     updateModuloRowCount();
     var firstInput = tr.querySelector('[data-field="contenedor"]');
     if (firstInput) firstInput.focus();
-    // Persist right away so the row survives a poll even if the user only
-    // touches one field before moving on.
-    onModuloFieldChange(mod, tab, tr);
+    scheduleWrite();
   }
 
   function removeModuloServicio(mod, tab, tr) {
     if (!window.confirm("¿Eliminar este servicio?")) return;
+    var key = moduloRowsKey(mod, tab);
     var rowId = tr.dataset.rowId;
+    moduloRows[key] = (moduloRows[key] || []).filter(function (r) { return r.id !== rowId; });
     tr.remove();
     updateModuloRowCount();
-    if (rowId && rowId.indexOf("pending-") !== 0) {
-      firestoreDeleteDoc(moduloCollectionId(mod, tab), rowId).catch(function (err) { console.error("Modulo delete error:", err); });
-    }
+    clearTimeout(writeTimer);
+    writeFullState();
   }
 
-  var moduloPollTimer = null;
   var activeModulo = null;
   var activeModuloTab = null;
-  var MODULO_POLL_MS = 5000;
-
-  function pollModuloTab() {
-    if (!activeModulo || !activeModuloTab) return;
-    var mod = activeModulo, tab = activeModuloTab;
-    firestoreListCollection(moduloCollectionId(mod, tab)).then(function (docs) {
-      if (activeModulo !== mod || activeModuloTab !== tab) return; // switched away meanwhile
-      docs.sort(function (a, b) { return (a.data.createdAt || 0) - (b.data.createdAt || 0); });
-      var tbodyModulo = document.getElementById("moduloRowsBody");
-      var existingById = {};
-      Array.prototype.forEach.call(tbodyModulo.querySelectorAll("tr"), function (tr) {
-        if (tr.dataset.rowId) existingById[tr.dataset.rowId] = tr;
-      });
-      var seen = {};
-      docs.forEach(function (doc, idx) {
-        seen[doc.id] = true;
-        var tr = existingById[doc.id];
-        if (!tr) {
-          tr = createModuloRowElement(mod, tab, doc.id, doc.data);
-          tbodyModulo.insertBefore(tr, tbodyModulo.children[idx] || null);
-          return;
-        }
-        if (tbodyModulo.children[idx] !== tr) tbodyModulo.insertBefore(tr, tbodyModulo.children[idx] || null);
-        MODULO_FIELD_KEYS.forEach(function (f) {
-          var el = tr.querySelector('[data-field="' + f + '"]');
-          if (el && document.activeElement !== el && el.value !== (doc.data[f] || "")) {
-            el.value = doc.data[f] || "";
-          }
-        });
-        refreshModuloRowDurations(tr);
-      });
-      Object.keys(existingById).forEach(function (id) {
-        if (seen[id]) return;
-        if (id.indexOf("pending-") === 0) return; // not yet created remotely
-        var tr = existingById[id];
-        if (document.activeElement && tr.contains(document.activeElement)) return;
-        tr.remove();
-      });
-      updateModuloRowCount();
-      refreshMatrizContenedoresDatalist();
-    }).catch(function (err) {
-      console.error("Modulo poll error:", err);
-    });
-  }
 
   function refreshMatrizContenedoresDatalist() {
     var dl = document.getElementById("matrizContenedoresList");
@@ -1543,17 +1464,11 @@
     Array.prototype.forEach.call(document.getElementById("moduloTabs").children, function (b) {
       b.classList.toggle("active", b === btnEl);
     });
-    document.getElementById("moduloRowsBody").innerHTML = "";
-    updateModuloRowCount();
-    clearInterval(moduloPollTimer);
-    pollModuloTab();
-    moduloPollTimer = setInterval(pollModuloTab, MODULO_POLL_MS);
+    renderModuloRowsBody(mod, tab);
   }
 
   function closeModulo() {
     document.getElementById("modalClienteModulo").hidden = true;
-    clearInterval(moduloPollTimer);
-    moduloPollTimer = null;
     activeModulo = null;
     activeModuloTab = null;
   }
