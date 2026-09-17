@@ -295,6 +295,7 @@
         <tbody id="rowsBody"></tbody>
       </table>
     </div>
+    <datalist id="clientesList"></datalist>
 
     <div class="footer-bar">
       <button class="btn-reset" id="btnReset" type="button">
@@ -382,6 +383,10 @@
   ];
   // Mutable, synced list of status options (defaults + any custom ones added).
   var statusOptions = DEFAULT_STATUS_OPTIONS.slice();
+
+  // Mutable, synced list of client names — feeds itself: every new name typed
+  // into a "Cliente" field gets added here automatically, no manual step.
+  var clientesConocidos = [];
 
   var TIPO_COLORS = {
     "Propio": { color: "#1D4ED8", bg: "#DBEAFE" },
@@ -498,11 +503,32 @@
 
   function applyRemoteState(data) {
     applyingRemote = true;
+    var neededMigrationWrite = false;
     try {
       if (Array.isArray(data.statusOptions) && data.statusOptions.length) {
         if (JSON.stringify(data.statusOptions) !== JSON.stringify(statusOptions)) {
           statusOptions = data.statusOptions;
           refreshAllStatusSelects();
+        }
+      }
+      if (Array.isArray(data.clientes) && data.clientes.length) {
+        if (JSON.stringify(data.clientes) !== JSON.stringify(clientesConocidos)) {
+          clientesConocidos = data.clientes;
+          refreshClientesDatalist();
+        }
+      } else if (Array.isArray(data.rows)) {
+        // First time this field exists: seed the client list from whatever
+        // client names are already typed into rows, so it's never empty.
+        var seeded = [];
+        data.rows.forEach(function (r) {
+          var c = (r.cliente || "").trim();
+          if (c && !seeded.some(function (x) { return x.toLowerCase() === c.toLowerCase(); })) seeded.push(c);
+        });
+        if (seeded.length) {
+          seeded.sort(function (a, b) { return a.localeCompare(b, "es"); });
+          clientesConocidos = seeded;
+          refreshClientesDatalist();
+          neededMigrationWrite = true;
         }
       }
       if (Array.isArray(data.rows)) {
@@ -511,7 +537,6 @@
           if (tr.dataset.rowId) existingById[tr.dataset.rowId] = tr;
         });
         var seenIds = {};
-        var neededMigrationWrite = false;
 
         data.rows.forEach(function (r, idx) {
           var hasRealId = !!r.id;
@@ -602,7 +627,7 @@
   }
 
   function writeFullState() {
-    var body = { rows: collectRows(), statusOptions: statusOptions, updatedAt: Date.now() };
+    var body = { rows: collectRows(), statusOptions: statusOptions, clientes: clientesConocidos, updatedAt: Date.now() };
     if (lastCapture) body.lastCapture = lastCapture.getTime();
     firestorePatch(body).catch(function (err) {
       console.error("Firestore write error (writeFullState):", err);
@@ -711,6 +736,28 @@
 
   function updateUnidadesLabel() {
     document.getElementById("totalUnidadesLabel").textContent = tbody.children.length + " unidades registradas";
+  }
+
+  // --- clients: self-feeding list, no manual "add" step ---
+  function refreshClientesDatalist() {
+    var dl = document.getElementById("clientesList");
+    dl.innerHTML = "";
+    clientesConocidos.forEach(function (nombre) {
+      var o = document.createElement("option");
+      o.value = nombre;
+      dl.appendChild(o);
+    });
+  }
+
+  function registerClienteIfNew(nombre) {
+    nombre = (nombre || "").trim();
+    if (!nombre) return false;
+    var exists = clientesConocidos.some(function (c) { return c.toLowerCase() === nombre.toLowerCase(); });
+    if (exists) return false;
+    clientesConocidos.push(nombre);
+    clientesConocidos.sort(function (a, b) { return a.localeCompare(b, "es"); });
+    refreshClientesDatalist();
+    return true;
   }
 
   function formatTime(d) {
@@ -871,8 +918,13 @@
     inpCliente.type = "text";
     inpCliente.placeholder = "Nombre del cliente";
     inpCliente.dataset.field = "cliente";
+    inpCliente.setAttribute("list", "clientesList");
     inpCliente.value = rowData.cliente || "";
     inpCliente.addEventListener("input", scheduleWrite);
+    inpCliente.addEventListener("change", function () {
+      registerClienteIfNew(inpCliente.value);
+      scheduleWrite();
+    });
     tdCliente.appendChild(inpCliente);
     tr.appendChild(tdCliente);
 
