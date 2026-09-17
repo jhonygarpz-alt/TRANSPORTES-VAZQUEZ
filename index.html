@@ -576,7 +576,7 @@
           if (document.activeElement !== inpContenedor && inpContenedor.value !== (r.contenedor || "")) {
             inpContenedor.value = r.contenedor || "";
           }
-          if (document.activeElement !== inpUbic && inpUbic.value !== (r.ubicacion || "")) {
+          if (document.activeElement !== inpUbic && !inpUbic.dataset.geocoding && inpUbic.value !== (r.ubicacion || "")) {
             inpUbic.value = r.ubicacion || "";
           }
           if (document.activeElement !== selTipo && selTipo.value !== (r.tipo || "Propio")) {
@@ -623,14 +623,41 @@
     return "r" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   }
 
+  // --- coordinates -> address (reverse geocoding via OpenStreetMap Nominatim) ---
+  function parseCoordinates(text) {
+    var m = /^\s*(-?\d{1,3}(?:\.\d+)?)\s*[,;\s]\s*(-?\d{1,3}(?:\.\d+)?)\s*$/.exec(text || "");
+    if (!m) return null;
+    var lat = parseFloat(m[1]);
+    var lon = parseFloat(m[2]);
+    if (isNaN(lat) || isNaN(lon)) return null;
+    if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return null;
+    return { lat: lat, lon: lon };
+  }
+
+  function reverseGeocode(lat, lon) {
+    var url = "https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=" + lat +
+      "&lon=" + lon + "&zoom=16&addressdetails=0&accept-language=es";
+    return fetch(url, { headers: { "Accept": "application/json" } }).then(function (res) {
+      if (!res.ok) throw new Error("reverse geocode HTTP " + res.status);
+      return res.json();
+    }).then(function (data) {
+      if (!data || !data.display_name) throw new Error("Sin resultado para esas coordenadas");
+      return data.display_name;
+    });
+  }
+
   function collectRows() {
     return Array.prototype.map.call(tbody.querySelectorAll("tr"), function (tr) {
+      var inpUbic = tr.querySelector('input[data-field="ubicacion"]');
       return {
         id: tr.dataset.rowId,
         unidad: tr.querySelector(".unidad-text").textContent,
         tipo: tr.querySelector('select[data-field="tipo"]').value,
         contenedor: tr.querySelector('input[data-field="contenedor"]').value,
-        ubicacion: tr.querySelector('input[data-field="ubicacion"]').value,
+        // While a reverse-geocode lookup is in flight the field shows a
+        // "Buscando…" placeholder — never let that leak into a write
+        // triggered by editing some other row in the meantime.
+        ubicacion: inpUbic.dataset.geocoding ? (inpUbic.dataset.pendingValue || "") : inpUbic.value,
         status: tr.querySelector('select[data-field="status"]').value,
         cliente: tr.querySelector('input[data-field="cliente"]').value
       };
@@ -930,10 +957,32 @@
     var tdUbic = document.createElement("td");
     var inpUbic = document.createElement("input");
     inpUbic.type = "text";
-    inpUbic.placeholder = "Ej. Puebla, MEX-CDMX km 120";
+    inpUbic.placeholder = "Ej. Puebla, MEX-CDMX km 120 o 19.4326, -99.1332";
     inpUbic.dataset.field = "ubicacion";
     inpUbic.value = rowData.ubicacion || "";
     inpUbic.addEventListener("input", scheduleWrite);
+    inpUbic.addEventListener("change", function () {
+      var coords = parseCoordinates(inpUbic.value);
+      if (!coords) return;
+      var original = inpUbic.value;
+      // Stash the real value so a write triggered by another row mid-lookup
+      // (shared debounce timer) never persists the "Buscando…" placeholder.
+      inpUbic.dataset.pendingValue = original;
+      inpUbic.value = "Buscando dirección…";
+      inpUbic.disabled = true;
+      inpUbic.dataset.geocoding = "1";
+      reverseGeocode(coords.lat, coords.lon).then(function (address) {
+        inpUbic.value = address;
+        scheduleWrite();
+      }).catch(function (err) {
+        console.error("Reverse geocoding error:", err);
+        inpUbic.value = original;
+      }).finally(function () {
+        inpUbic.disabled = false;
+        delete inpUbic.dataset.geocoding;
+        delete inpUbic.dataset.pendingValue;
+      });
+    });
     tdUbic.appendChild(inpUbic);
     tr.appendChild(tdUbic);
 
