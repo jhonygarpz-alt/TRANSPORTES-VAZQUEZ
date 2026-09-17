@@ -242,6 +242,45 @@
     background: repeating-linear-gradient(45deg, #FEE2E2, #FEE2E2 10px, #FECACA 10px, #FECACA 20px) !important;
   }
 
+  .tabs {
+    display: flex; gap: 4px; padding: 0 20px;
+    background: linear-gradient(135deg, var(--brand), var(--brand-light));
+  }
+  .tab-btn {
+    padding: 10px 18px; border: none; background: rgba(255,255,255,.18); color: #fff;
+    font-weight: 600; font-size: 14px; border-radius: 10px 10px 0 0; cursor: pointer;
+  }
+  .tab-btn:hover { background: rgba(255,255,255,.28); }
+  .tab-btn.active { background: #fff; color: var(--brand); }
+
+  .clientes-toolbar {
+    padding: 14px 24px; border-bottom: 1px solid #FFE0CC;
+    display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+  }
+  .clientes-count { font-size: 13px; color: #7C2D12; font-weight: 600; }
+  .clientes-grid {
+    padding: 18px 24px 24px; display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 14px;
+  }
+  .clientes-empty { grid-column: 1 / -1; text-align: center; color: #6B7280; font-size: 14px; padding: 30px 10px; }
+  .cliente-card { border: 1px solid #FFE0CC; border-radius: 12px; padding: 14px; background: #FFFBF8; }
+  .cliente-card-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 10px; }
+  .cliente-name { font-weight: 700; color: var(--brand); font-size: 15px; word-break: break-word; }
+  .operadores-list { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; min-height: 4px; }
+  .operador-pill {
+    display: flex; align-items: center; gap: 6px; background: #fff; border: 1px solid #E5E7EB;
+    border-radius: 999px; padding: 4px 6px 4px 10px; font-size: 12px; font-weight: 600; color: #1F2937;
+  }
+  .operador-add-row { display: flex; gap: 6px; }
+  .operador-add-row input {
+    flex: 1; padding: 7px 10px; border-radius: 8px; border: 1px solid #E5E7EB; font: inherit; font-size: 13px; color: #1F2937;
+  }
+  .operador-add-row button {
+    flex: none; padding: 7px 12px; font-size: 13px; border-radius: 8px; border: 1px solid #D1D5DB;
+    background: #fff; color: #4B5563; cursor: pointer; font-weight: 500;
+  }
+  .operador-add-row button:hover { background: #F9FAFB; }
+
   @media (max-width: 640px) {
     .header { flex-direction: column; align-items: flex-start; }
     .clock-box { align-self: flex-start; }
@@ -274,44 +313,59 @@
       </div>
     </div>
 
-    <div class="subbar">
-      <div class="left">
-        <svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
-        <span>Actualizar cada 2 horas · <span id="totalUnidadesLabel"></span></span>
+    <div class="tabs">
+      <button class="tab-btn active" id="tabEstatus" type="button">Estatus de Flota</button>
+      <button class="tab-btn" id="tabClientes" type="button">Clientes</button>
+    </div>
+
+    <div id="panelEstatus">
+      <div class="subbar">
+        <div class="left">
+          <svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
+          <span>Actualizar cada 2 horas · <span id="totalUnidadesLabel"></span></span>
+        </div>
+        <div class="right" id="lastCaptureLabel">Aún sin captura en este turno</div>
       </div>
-      <div class="right" id="lastCaptureLabel">Aún sin captura en este turno</div>
+
+      <div class="toolbar">
+        <button class="btn-reset btn-small" id="btnAddUnit" type="button">+ Agregar unidad</button>
+        <button class="btn-reset btn-small" id="btnAddStatus" type="button">+ Nuevo estatus</button>
+      </div>
+
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th class="w-unidad">UNIDAD</th>
+              <th class="w-contenedor">CONTENEDOR</th>
+              <th>UBICACIÓN ACTUAL</th>
+              <th class="w-status">STATUS ACTUAL</th>
+              <th class="w-cliente">CLIENTE</th>
+            </tr>
+          </thead>
+          <tbody id="rowsBody"></tbody>
+        </table>
+      </div>
+      <datalist id="clientesList"></datalist>
+
+      <div class="footer-bar">
+        <button class="btn-reset" id="btnReset" type="button">
+          <svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-6.36L1 10"/></svg>
+          Limpiar barrido
+        </button>
+        <button class="btn-capture" id="btnCapture" type="button">
+          <svg class="icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+          <span id="captureLabel">Capturar y compartir</span>
+        </button>
+      </div>
     </div>
 
-    <div class="toolbar">
-      <button class="btn-reset btn-small" id="btnAddUnit" type="button">+ Agregar unidad</button>
-      <button class="btn-reset btn-small" id="btnAddStatus" type="button">+ Nuevo estatus</button>
-    </div>
-
-    <div class="table-scroll">
-      <table>
-        <thead>
-          <tr>
-            <th class="w-unidad">UNIDAD</th>
-            <th class="w-contenedor">CONTENEDOR</th>
-            <th>UBICACIÓN ACTUAL</th>
-            <th class="w-status">STATUS ACTUAL</th>
-            <th class="w-cliente">CLIENTE</th>
-          </tr>
-        </thead>
-        <tbody id="rowsBody"></tbody>
-      </table>
-    </div>
-    <datalist id="clientesList"></datalist>
-
-    <div class="footer-bar">
-      <button class="btn-reset" id="btnReset" type="button">
-        <svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-6.36L1 10"/></svg>
-        Limpiar barrido
-      </button>
-      <button class="btn-capture" id="btnCapture" type="button">
-        <svg class="icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
-        <span id="captureLabel">Capturar y compartir</span>
-      </button>
+    <div id="panelClientes" hidden>
+      <div class="clientes-toolbar">
+        <span class="clientes-count" id="clientesCount">0 clientes registrados</span>
+        <button class="btn-capture btn-small" id="btnAddClienteTab" type="button">+ Nuevo cliente</button>
+      </div>
+      <div class="clientes-grid" id="clientesGrid"></div>
     </div>
   </div>
 
@@ -363,6 +417,18 @@
   </div>
 </div>
 
+<div class="modal-overlay" id="modalAddCliente" hidden>
+  <div class="modal-card">
+    <h3>Nuevo cliente</h3>
+    <label for="newClienteName">Nombre del cliente</label>
+    <input type="text" id="newClienteName" placeholder="Ej. KOBLENZ" />
+    <div class="modal-actions">
+      <button type="button" class="btn-reset" id="cancelAddCliente">Cancelar</button>
+      <button type="button" class="btn-capture" id="confirmAddCliente">Agregar</button>
+    </div>
+  </div>
+</div>
+
 <script>
 (function () {
   "use strict";
@@ -393,6 +459,11 @@
   // Mutable, synced list of client names — feeds itself: every new name typed
   // into a "Cliente" field gets added here automatically, no manual step.
   var clientesConocidos = [];
+
+  // Directory of operadores (choferes/unidades) per cliente, keyed by client
+  // name exactly as stored in clientesConocidos. Independent of the rows
+  // table — a client can have registered operadores with no active rows.
+  var clientesOperadores = {};
 
   var TIPO_COLORS = {
     "Propio": { color: "#1D4ED8", bg: "#DBEAFE" },
@@ -517,10 +588,12 @@
           refreshAllStatusSelects();
         }
       }
+      var clientesChanged = false;
       if (Array.isArray(data.clientes) && data.clientes.length) {
         if (JSON.stringify(data.clientes) !== JSON.stringify(clientesConocidos)) {
           clientesConocidos = data.clientes;
           refreshClientesDatalist();
+          clientesChanged = true;
         }
       } else if (Array.isArray(data.rows)) {
         // First time this field exists: seed the client list from whatever
@@ -534,9 +607,17 @@
           seeded.sort(function (a, b) { return a.localeCompare(b, "es"); });
           clientesConocidos = seeded;
           refreshClientesDatalist();
+          clientesChanged = true;
           neededMigrationWrite = true;
         }
       }
+      if (data.clientesOperadores && typeof data.clientesOperadores === "object" && !Array.isArray(data.clientesOperadores)) {
+        if (JSON.stringify(data.clientesOperadores) !== JSON.stringify(clientesOperadores)) {
+          clientesOperadores = data.clientesOperadores;
+          clientesChanged = true;
+        }
+      }
+      if (clientesChanged && !panelClientes.hidden) renderClientesTab();
       if (Array.isArray(data.rows)) {
         var existingById = {};
         Array.prototype.forEach.call(tbody.querySelectorAll("tr"), function (tr) {
@@ -665,7 +746,7 @@
   }
 
   function writeFullState() {
-    var body = { rows: collectRows(), statusOptions: statusOptions, clientes: clientesConocidos, updatedAt: Date.now() };
+    var body = { rows: collectRows(), statusOptions: statusOptions, clientes: clientesConocidos, clientesOperadores: clientesOperadores, updatedAt: Date.now() };
     if (lastCapture) body.lastCapture = lastCapture.getTime();
     firestorePatch(body).catch(function (err) {
       console.error("Firestore write error (writeFullState):", err);
@@ -798,6 +879,134 @@
     return true;
   }
 
+  // --- Clientes tab: directory of operadores (choferes/unidades) per cliente ---
+  function renderClientesTab() {
+    var grid = document.getElementById("clientesGrid");
+    grid.innerHTML = "";
+    document.getElementById("clientesCount").textContent =
+      clientesConocidos.length + (clientesConocidos.length === 1 ? " cliente registrado" : " clientes registrados");
+
+    if (!clientesConocidos.length) {
+      var empty = document.createElement("div");
+      empty.className = "clientes-empty";
+      empty.textContent = 'Aún no hay clientes registrados. Usa "+ Nuevo cliente" o escribe uno en la columna Cliente.';
+      grid.appendChild(empty);
+      return;
+    }
+
+    clientesConocidos.forEach(function (nombre) {
+      var card = document.createElement("div");
+      card.className = "cliente-card";
+
+      var head = document.createElement("div");
+      head.className = "cliente-card-head";
+      var nameEl = document.createElement("span");
+      nameEl.className = "cliente-name";
+      nameEl.textContent = nombre;
+      var delBtn = document.createElement("button");
+      delBtn.type = "button";
+      delBtn.className = "del-status-btn";
+      delBtn.title = "Eliminar cliente";
+      delBtn.textContent = "×";
+      delBtn.addEventListener("click", function () { removeCliente(nombre); });
+      head.appendChild(nameEl);
+      head.appendChild(delBtn);
+      card.appendChild(head);
+
+      var list = document.createElement("div");
+      list.className = "operadores-list";
+      var operadores = clientesOperadores[nombre] || [];
+      operadores.forEach(function (op) {
+        var pill = document.createElement("span");
+        pill.className = "operador-pill";
+        var opText = document.createElement("span");
+        opText.textContent = op;
+        var rm = document.createElement("button");
+        rm.type = "button";
+        rm.className = "del-status-btn";
+        rm.title = "Quitar operador";
+        rm.textContent = "×";
+        rm.addEventListener("click", function () { removeOperador(nombre, op); });
+        pill.appendChild(opText);
+        pill.appendChild(rm);
+        list.appendChild(pill);
+      });
+      card.appendChild(list);
+
+      var addRow = document.createElement("div");
+      addRow.className = "operador-add-row";
+      var input = document.createElement("input");
+      input.type = "text";
+      input.placeholder = "Chofer o unidad…";
+      var addBtn = document.createElement("button");
+      addBtn.type = "button";
+      addBtn.textContent = "+ Agregar";
+      function submitOperador() {
+        var val = input.value.trim();
+        if (!val) return;
+        addOperador(nombre, val);
+        input.value = "";
+        input.focus();
+      }
+      addBtn.addEventListener("click", submitOperador);
+      input.addEventListener("keydown", function (e) {
+        if (e.key === "Enter") { e.preventDefault(); submitOperador(); }
+      });
+      addRow.appendChild(input);
+      addRow.appendChild(addBtn);
+      card.appendChild(addRow);
+
+      grid.appendChild(card);
+    });
+  }
+
+  function addCliente(nombre) {
+    var added = registerClienteIfNew(nombre);
+    if (!added) {
+      window.alert("Ese cliente ya existe.");
+      return;
+    }
+    renderClientesTab();
+    clearTimeout(writeTimer);
+    writeFullState();
+  }
+
+  function removeCliente(nombre) {
+    var inUse = collectRows().some(function (r) { return (r.cliente || "").toLowerCase() === nombre.toLowerCase(); });
+    if (inUse) {
+      window.alert('No se puede eliminar "' + nombre + '" porque hay unidades con ese cliente asignado. Cámbialas primero a otro cliente.');
+      return;
+    }
+    if (!window.confirm('¿Eliminar al cliente "' + nombre + '" y sus operadores registrados?')) return;
+    clientesConocidos = clientesConocidos.filter(function (c) { return c.toLowerCase() !== nombre.toLowerCase(); });
+    delete clientesOperadores[nombre];
+    refreshClientesDatalist();
+    renderClientesTab();
+    clearTimeout(writeTimer);
+    writeFullState();
+  }
+
+  function addOperador(cliente, operador) {
+    var list = clientesOperadores[cliente] || [];
+    var exists = list.some(function (o) { return o.toLowerCase() === operador.toLowerCase(); });
+    if (exists) {
+      renderClientesTab();
+      return;
+    }
+    clientesOperadores[cliente] = list.concat([operador]);
+    renderClientesTab();
+    clearTimeout(writeTimer);
+    writeFullState();
+  }
+
+  function removeOperador(cliente, operador) {
+    var list = clientesOperadores[cliente] || [];
+    clientesOperadores[cliente] = list.filter(function (o) { return o !== operador; });
+    renderClientesTab();
+    clearTimeout(writeTimer);
+    writeFullState();
+  }
+
   function formatTime(d) {
     return d.toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
   }
@@ -859,6 +1068,8 @@
 
   // --- build one row element (used for the initial table and for units added later) ---
   var tbody = document.getElementById("rowsBody");
+  var panelEstatus = document.getElementById("panelEstatus");
+  var panelClientes = document.getElementById("panelClientes");
 
   function createRowElement(rowData) {
     var tr = document.createElement("tr");
@@ -1119,6 +1330,47 @@
   modalAddStatus.addEventListener("click", function (e) {
     if (e.target === modalAddStatus) modalAddStatus.hidden = true;
   });
+
+  // --- tabs: Estatus de Flota / Clientes ---
+  var tabEstatus = document.getElementById("tabEstatus");
+  var tabClientes = document.getElementById("tabClientes");
+  tabEstatus.addEventListener("click", function () {
+    tabEstatus.classList.add("active");
+    tabClientes.classList.remove("active");
+    panelEstatus.hidden = false;
+    panelClientes.hidden = true;
+  });
+  tabClientes.addEventListener("click", function () {
+    tabClientes.classList.add("active");
+    tabEstatus.classList.remove("active");
+    panelClientes.hidden = false;
+    panelEstatus.hidden = true;
+    renderClientesTab();
+  });
+
+  // --- add-client modal ---
+  var modalAddCliente = document.getElementById("modalAddCliente");
+  document.getElementById("btnAddClienteTab").addEventListener("click", function () {
+    document.getElementById("newClienteName").value = "";
+    modalAddCliente.hidden = false;
+    document.getElementById("newClienteName").focus();
+  });
+  document.getElementById("cancelAddCliente").addEventListener("click", function () {
+    modalAddCliente.hidden = true;
+  });
+  document.getElementById("confirmAddCliente").addEventListener("click", function () {
+    var name = document.getElementById("newClienteName").value.trim();
+    if (!name) {
+      window.alert("Escribe un nombre para el cliente.");
+      return;
+    }
+    addCliente(name);
+    modalAddCliente.hidden = true;
+  });
+  modalAddCliente.addEventListener("click", function (e) {
+    if (e.target === modalAddCliente) modalAddCliente.hidden = true;
+  });
+  renderClientesTab();
 
   // --- capture / generate PNG ---
   document.getElementById("btnCapture").addEventListener("click", function () {
