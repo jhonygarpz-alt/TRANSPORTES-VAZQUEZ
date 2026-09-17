@@ -1365,13 +1365,17 @@
     var tdEstatus = document.createElement("td");
     var selEstatus = document.createElement("select");
     selEstatus.dataset.field = "estatus";
+    var optBlank = document.createElement("option");
+    optBlank.value = "";
+    optBlank.textContent = "— Sin estatus —";
+    selEstatus.appendChild(optBlank);
     CICLOS_ESTATUS.forEach(function (label) {
       var o = document.createElement("option");
       o.value = label;
       o.textContent = label;
       selEstatus.appendChild(o);
     });
-    selEstatus.value = data.estatus && CICLOS_ESTATUS.indexOf(data.estatus) !== -1 ? data.estatus : CICLOS_ESTATUS[0];
+    selEstatus.value = data.estatus && CICLOS_ESTATUS.indexOf(data.estatus) !== -1 ? data.estatus : "";
     selEstatus.addEventListener("change", function () { onModuloFieldChange(mod, tab, tr); });
     tdEstatus.appendChild(selEstatus);
     tr.appendChild(tdEstatus);
